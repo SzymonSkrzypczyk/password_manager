@@ -39,14 +39,27 @@ class DBControl:
     def add_user(self, name: str):
         with self.get_con() as con:
             cur = con.cursor()
-            cur.execute(f"INSERT INTO user(name) VALUES('{name}');")
+            cur.execute(f"INSERT INTO user(name) VALUES('{name}') RETURNING *;")
+            index = cur.fetchone()[0] + 1
             con.commit()
+        return index
+
+    def check_user(self, user_id: int):
+        with self.get_con() as con:
+            cur = con.cursor()
+            cur.execute(f"SELECT * FROM user;")
+            if len([i for i in cur.fetchall() if i[0] == user_id]):
+                return True
+        return False
 
     def add_password(self, name: str, password: str, user_id: int):
         with self.get_con() as con:
             cur = con.cursor()
-            cur.execute(f"INSERT INTO passwords(name, password, user_id) VALUES('{name}', '{password}', {user_id});")
+            cur.execute(f"INSERT INTO passwords(name, password, user_id) VALUES('{name}', '{password}',"
+                        f" {user_id}) RETURNING *;")
+            index = cur.fetchone()[0] + 1
             con.commit()
+        return index
 
     def clear_passwords_user(self, user_id: int):
         with self.get_con() as con:
@@ -73,6 +86,13 @@ class DBControl:
             cur.execute(f"SELECT * FROM user WHERE name='{name}'")
             return cur.fetchone()[0]
 
+    def get_all_users(self):
+        with self.get_con() as con:
+            cur = con.cursor()
+            cur.execute(f"SELECT * FROM user;")
+            data = cur.fetchall()
+        return data
+
     def update_password(self, password_id: int, new_password: str):
         with self.get_con() as con:
             cur = con.cursor()
@@ -84,5 +104,6 @@ if __name__ == "__main__":
     db = DBControl()
     # db.add_user('XD')
     # db.add_password('DX', 'XDDD', 1)
-    print(db.get_user_passwords(1))
+    print(db.check_user(1))
+    # print(db.get_user_passwords(1))
     # db.get_user_passwords()
