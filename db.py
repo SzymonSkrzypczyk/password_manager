@@ -44,7 +44,7 @@ class DBControl:
             con.commit()
         return index
 
-    def check_user(self, user_id: int):
+    def check_user_id(self, user_id: int):
         with self.get_con() as con:
             cur = con.cursor()
             cur.execute(f"SELECT * FROM user;")
@@ -84,7 +84,12 @@ class DBControl:
         with self.get_con() as con:
             cur = con.cursor()
             cur.execute(f"SELECT * FROM user WHERE name='{name}'")
-            return cur.fetchone()[0]
+            data = cur.fetchone()
+        if data:
+            return data[0]
+        else:
+            # co robicw takim wypadku?
+            return None
 
     def get_all_users(self):
         with self.get_con() as con:
@@ -104,6 +109,6 @@ if __name__ == "__main__":
     db = DBControl()
     # db.add_user('XD')
     # db.add_password('DX', 'XDDD', 1)
-    print(db.check_user(1))
+    print(db.check_user_id(1))
     # print(db.get_user_passwords(1))
     # db.get_user_passwords()

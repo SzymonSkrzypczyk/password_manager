@@ -5,13 +5,14 @@ from PySide6.QtGui import QFont
 from PySide6.QtCore import Qt, Signal
 
 from db import DBControl
+from face_rec_easier import recognize_gui
 
 """
 Dziala: dodawanie, update'owanie
 Nie Dziala: usuwanie, usuwanie wszyskiego, login page na starcie
 czasami sie buguje i pojawiaja sie itemy ktore nie powinny istniec
 teraz trzeba dodac logike co gdy dany uzytkownik nie istnieje jeszcze w bazie
-trzeba poprawic logowanie zeby nie pokazywalo sie glowne okienko w czasie logowania 
+trzeba dodac dialog dla niewykrycia twarzy i moze jakis defaultowy profil w takim wypadku
 """
 
 
@@ -169,7 +170,8 @@ class LoginDialog(QDialog):
         self.main_window.show()
         # przekazywanie id usera do maina
         # placeholder
-        detected_id = 1
+        recognize_gui(self.main_window)
+        '''detected_id = 1
         if self.main_window.db.check_user(detected_id):
             self.main_window.current_user = 1
             self.main_window.load_at_startup()
@@ -178,8 +180,7 @@ class LoginDialog(QDialog):
             # mam nadzieje ze zadziala
             index = self.main_window.db.add_user(str(uuid4()))
             self.main_window.current_user = index
-            self.main_window.load_at_startup()
-        return True
+            self.main_window.load_at_startup()'''
 
 
 class MainWindow(QMainWindow):
@@ -287,9 +288,12 @@ class MainWindow(QMainWindow):
             pw_field.delete_signal.connect(self._delete)
             self.passwords_lay.addWidget(pw_field)
         self.update()
+        self.login_page.hide()
 
 
 app = QApplication([])
-window = MainWindow()
+main_window = MainWindow()
+main_window.hide()
+window = LoginDialog(main_window)
 window.show()
 app.exec()
