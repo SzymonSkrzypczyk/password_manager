@@ -7,6 +7,7 @@ import face_recognition
 
 IMAGE_PATH = Path(__file__).parent / 'images'
 ENCODED_PATH = Path(__file__).parent / 'encoding.pkl'
+DEFAULT_USER_NAME = "DEFAULT"
 
 
 def _get_face():
@@ -56,11 +57,19 @@ def encode_known():
 
 
 def recognize_gui(main_window):
-    result, frame = validate_face()
+    # maybe will return name of the user
+    # DEFAULT if no face is detected
+    validation_result = validate_face()
+    if validation_result is None or validation_result[0] is None:
+        index = main_window.db.get_user_id(DEFAULT_USER_NAME)
+        main_window.current_index = index
+        main_window.load_at_startup()
+        return 'DEFAULT'
+
+    result, frame = validation_result
     if result:
         # blad tutaj
         index = main_window.db.get_user_id(result)
-        print(index)
         # mozliwe ze na tym etapie zle dziala ustalanie uzytkownika
         if index is not None:
             main_window.current_index = index
@@ -70,8 +79,7 @@ def recognize_gui(main_window):
             main_window.index = index
             cv2.imwrite(str((IMAGE_PATH / name).with_suffix('.jpg')), frame)
         main_window.load_at_startup()
-        return True
-    return False
+        return result
 
 
 if __name__ == '__main__':

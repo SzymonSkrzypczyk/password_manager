@@ -107,8 +107,4 @@ class DBControl:
 
 if __name__ == "__main__":
     db = DBControl()
-    # db.add_user('XD')
-    # db.add_password('DX', 'XDDD', 1)
-    print(db.check_user_id(1))
-    # print(db.get_user_passwords(1))
-    # db.get_user_passwords()
+    db.add_user("DEFAULT")

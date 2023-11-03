@@ -1,11 +1,11 @@
-from uuid import uuid4
+from warnings import simplefilter
 from PySide6.QtWidgets import QApplication, QWidget, QScrollArea, QPushButton, QLabel, QDialog, QVBoxLayout,\
      QHBoxLayout, QMainWindow, QLineEdit, QFormLayout, QDialogButtonBox
 from PySide6.QtGui import QFont
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QRunnable, Slot, QThreadPool, QTimer
 
 from db import DBControl
-from face_rec_easier import recognize_gui
+from face_rec_easier import recognize_gui, encode_known
 
 """
 Dziala: dodawanie, update'owanie
@@ -13,16 +13,19 @@ Nie Dziala: usuwanie, usuwanie wszyskiego, login page na starcie
 czasami sie buguje i pojawiaja sie itemy ktore nie powinny istniec
 teraz trzeba dodac logike co gdy dany uzytkownik nie istnieje jeszcze w bazie
 trzeba dodac dialog dla niewykrycia twarzy i moze jakis defaultowy profil w takim wypadku
+trzebaby poprawic clear all i bedzie cacy
+pojawiaja sie warningi
 """
+simplefilter("ignore")
 
 
 class PasswordField(QWidget):
     delete_signal = Signal(int)
 
-    def __init__(self, name: str, password: str, index: int, main_window, parent=None):
+    def __init__(self, name: str, password: str, index: int, _main_window, parent=None):
         """trzeba dodac parametr dla main_window"""
         super(PasswordField, self).__init__(parent)
-        self.main_window = main_window
+        self.main_window = _main_window
         self.hidden = True
         self.index = index
         self.name = name
@@ -52,7 +55,7 @@ class PasswordField(QWidget):
         # self.main_window.db.delete_password(self.index)  # delete in db
 
     def _update(self, e):
-        dialog = UpdatePasswordDialog(self.name, self.password, self.index, self.parent())
+        dialog = UpdatePasswordDialog(self.name, self.password, self.parent())
         if dialog.exec() == QDialog.Accepted:
             # db
             new_password = dialog.return_data()
@@ -75,8 +78,25 @@ class PasswordField(QWidget):
         return self.index
 
 
+class WarningDialog(QDialog):
+    def __init__(self, parent=None):
+        super(WarningDialog, self).__init__(parent)
+        self.lay1 = QVBoxLayout()
+        self.setWindowTitle("No face detected!")
+
+        self.text = QLabel("No face has been detected\nDefault user enabled")
+        self.text.setAlignment(Qt.AlignCenter)
+        self.button = QPushButton("OK")
+        self.button.clicked.connect(self.accept)
+
+        self.lay1.addWidget(self.text)
+        self.lay1.addWidget(self.button)
+
+        self.setLayout(self.lay1)
+
+
 class UpdatePasswordDialog(QDialog):  # trzeba jeszce podpiac
-    def __init__(self, name, old_password, password_id, parent=None):  # dodac parametry dla hasla
+    def __init__(self, name, old_password, parent=None):  # usuwam password_id!
         super(UpdatePasswordDialog, self).__init__(parent)
         self.lay1 = QVBoxLayout()
         self.input_lay = QFormLayout()
@@ -137,10 +157,10 @@ class LoginDialog(QDialog):
     """Musi przekazywac id usera!
     i sprawdzac czy user juz istnieje
     """
-    def __init__(self, main_window, parent=None):
+    def __init__(self, _main_window, parent=None):
         super(LoginDialog, self).__init__(parent)
         self.setWindowTitle("Password Manager")
-        self.main_window = main_window
+        self.main_window = _main_window
 
         self.font_text = QFont("Montserrat")
         self.font_text.setPointSize(34)
@@ -166,11 +186,19 @@ class LoginDialog(QDialog):
 
     def detect(self):
         """Dummy method"""
-        self.accept()
-        self.main_window.show()
         # przekazywanie id usera do maina
         # placeholder
-        recognize_gui(self.main_window)
+        name = recognize_gui(self.main_window)
+        self.main_window.user_name = name
+        self.main_window.info_text.setText(name)
+        self.main_window.update()
+        if name == 'DEFAULT':
+            WarningDialog().exec()
+            # should not go further
+            # default profile maybe
+            # name is not shown in mainWindow
+        self.accept()
+        self.main_window.show()
         '''detected_id = 1
         if self.main_window.db.check_user(detected_id):
             self.main_window.current_user = 1
@@ -181,6 +209,18 @@ class LoginDialog(QDialog):
             index = self.main_window.db.add_user(str(uuid4()))
             self.main_window.current_user = index
             self.main_window.load_at_startup()'''
+
+
+class Worker(QRunnable):
+    def __init__(self, fn, *args, **kwargs):
+        super(Worker, self).__init__()
+        self.fn = fn
+        self.args = args
+        self.kwargs = kwargs
+
+    @Slot()
+    def run(self) -> None:
+        self.fn(*self.args, **self.kwargs)
 
 
 class MainWindow(QMainWindow):
@@ -195,7 +235,14 @@ class MainWindow(QMainWindow):
 
         # variables essential for the correct future functioning of the app
         self.current_user = 0  # id
+        self.user_name = "USERNAME"
         self.db = DBControl()
+
+        # background tasks
+        self.timer = QTimer()
+        self.timer.setInterval(25000)
+        self.timer.timeout.connect(self.update_encoding)
+        self.threadpool = QThreadPool()
 
         # run login page on startup
         self.login_page = LoginDialog(self)
@@ -206,7 +253,7 @@ class MainWindow(QMainWindow):
 
         # widgets
         self.info_area = QHBoxLayout()
-        self.info_text = QLabel("USER NAME")  # to be replaced!
+        self.info_text = QLabel(self.user_name)  # to be replaced!
         self.info_text.setFont(self.info_font)
         self.info_text.setAlignment(Qt.AlignCenter)
         self.info_area.addWidget(self.info_text)
@@ -236,15 +283,15 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(widget)
 
     def _clear_all(self, e):
-        # db delete
-        # tez nagle nie dziala
-        for child in self.passwords_lay.children():
+        while self.passwords_lay.count():
+            self.passwords_lay.takeAt(0).widget().deleteLater()
+        """for child in self.passwords_lay.children():
             child.deleteLater()
-        self.passwords_lay.children().clear()  # mozliwe ze nie jest to dobry pomysl
-        self.refresh()
-        self.current_index = 0
+        self.passwords_lay.children().clear()"""  # mozliwe ze nie jest to dobry pomysl
         if self.current_user is not None:  # bedzie mozna to potem usunac
-            self.db.clear_passwords_user(self.current_user)
+            self.db.clear_passwords_user(self.current_user)  # dziala
+        self.refresh()
+        # self.current_index = 0
 
     def _add(self, e):
         dialog = AddPasswordDialog()
@@ -258,6 +305,9 @@ class MainWindow(QMainWindow):
         self.update()
 
     def _logout(self, e):
+        while self.passwords_lay.count():
+            self.passwords_lay.takeAt(0).widget().deleteLater()
+        self.timer.stop()
         self.hide()
         self.login_page.show()
 
@@ -289,6 +339,12 @@ class MainWindow(QMainWindow):
             self.passwords_lay.addWidget(pw_field)
         self.update()
         self.login_page.hide()
+        self.timer.start()
+
+    def update_encoding(self):
+        worker = Worker(encode_known)
+        # doesn't work... yet :)
+        self.threadpool.start(worker)
 
 
 app = QApplication([])
