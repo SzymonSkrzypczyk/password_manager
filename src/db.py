@@ -1,10 +1,10 @@
 from pathlib import Path
 from typing import Union
 import sqlite3
-from uuid import uuid4
 from collections import namedtuple
 
 Password = namedtuple("Password", "pk name password")
+DEFAULT_DB_PATH = Path(__file__).parent.parent / 'data' / 'db.sql'
 
 
 class DBControl:
@@ -12,7 +12,7 @@ class DBControl:
     Probably will be changed to SQLalchemy
     The DB is not safe from injections
     """
-    def __init__(self, path: Union[str, Path] = Path(__file__).parent / 'db.sql'):
+    def __init__(self, path: Union[str, Path] = DEFAULT_DB_PATH):
         self.path = Path(path)
         if not self.path.exists():
             self.setup()
