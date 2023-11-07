@@ -1,22 +1,27 @@
 from warnings import simplefilter
+from pathlib import Path
+from uuid import uuid4
 from PySide6.QtWidgets import QApplication, QWidget, QScrollArea, QPushButton, QLabel, QDialog, QVBoxLayout,\
      QHBoxLayout, QMainWindow, QLineEdit, QFormLayout, QDialogButtonBox
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QFont, QAction
 from PySide6.QtCore import Qt, Signal, QRunnable, Slot, QThreadPool, QTimer
+import cv2
 
 from src.db import DBControl
-from src.face_rec_easier import recognize_gui, encode_known
+from src.face_rec_easier import recognize_gui, encode_known, new_face, IMAGE_PATH
 
 """
 Dziala: dodawanie, update'owanie
 Nie Dziala: usuwanie, usuwanie wszyskiego, login page na starcie, wykrywa caly czas ta sama osobe!!!
-czasami sie buguje i pojawiaja sie itemy ktore nie powinny istniec
 teraz trzeba dodac logike co gdy dany uzytkownik nie istnieje jeszcze w bazie
 trzeba dodac dialog dla niewykrycia twarzy i moze jakis defaultowy profil w takim wypadku
 trzebaby poprawic clear all i bedzie cacy
 pojawiaja sie warningi
 dodanie opcji zmiany profilu itd
+moze trzeba encodowac po tym jak sie doda nowego uzytkownika(juz sie to dzieje jednak)
+jebei sie usuwanie usera a potem update'owanie
 """
+IMAGES = Path(__file__).parent.parent / 'images'
 simplefilter("ignore")
 
 
@@ -79,13 +84,40 @@ class PasswordField(QWidget):
         return self.index
 
 
+class RenameDialog(QDialog):
+    def __init__(self, old_name: str, parent=None):
+        super(RenameDialog, self).__init__(parent)
+
+        self.lay1 = QVBoxLayout()
+
+        self.current_name = QLineEdit()
+        self.current_name.setPlaceholderText(old_name)
+        self.current_name.setDisabled(True)
+
+        self.new_name = QLineEdit()
+        self.new_name.setPlaceholderText("New name")
+
+        QBtn = QDialogButtonBox.Ok | QDialogButtonBox.Cancel
+        self.buttonBox = QDialogButtonBox(QBtn)
+        self.buttonBox.accepted.connect(self.accept)
+        self.buttonBox.rejected.connect(self.reject)
+
+        self.lay1.addWidget(self.current_name)
+        self.lay1.addWidget(self.new_name)
+        self.lay1.addWidget(self.buttonBox)
+
+        self.setLayout(self.lay1)
+
+    def return_data(self):
+        return self.new_name.text()
+
+
 class WarningDialog(QDialog):
-    def __init__(self, parent=None):
+    def __init__(self, title, text, parent=None):
         super(WarningDialog, self).__init__(parent)
         self.lay1 = QVBoxLayout()
-        self.setWindowTitle("No face detected!")
-
-        self.text = QLabel("No face has been detected\nDefault user enabled")
+        self.setWindowTitle(title)
+        self.text = QLabel(text)
         self.text.setAlignment(Qt.AlignCenter)
         self.button = QPushButton("OK")
         self.button.clicked.connect(self.accept)
@@ -148,9 +180,6 @@ class AddPasswordDialog(QDialog):
         self.setLayout(self.lay1)
 
     def return_data(self):
-        # if self.name_input.text() and self.password_input.text() and self.parent().current_user is not None:
-            # print("Add Data To DB")
-            # self.parent().db.add_password()
         return self.name_input.text(), self.password_input.text()
 
 
@@ -176,12 +205,18 @@ class LoginDialog(QDialog):
         self.text = QLabel("Hello!\nPress the login button\n in order to have\n your face scanned :)")
         self.text.setAlignment(Qt.AlignCenter)
         self.text.setFont(self.font_text)
-        self.button = QPushButton("Login")
-        self.button.clicked.connect(self.detect)
-        self.button.setFont(self.font_button)
+
+        self.login_button = QPushButton("Login")
+        self.login_button.clicked.connect(self.detect)
+        self.login_button.setFont(self.font_button)
+
+        self.create_button = QPushButton("Add Account")
+        self.create_button.clicked.connect(self._create)
+        self.create_button.setFont(self.font_button)
 
         self.lay.addWidget(self.text)
-        self.lay.addWidget(self.button)
+        self.lay.addWidget(self.login_button)
+        self.lay.addWidget(self.create_button)
 
         self.setLayout(self.lay)
 
@@ -194,11 +229,12 @@ class LoginDialog(QDialog):
         self.main_window.info_text.setText(name)
         self.main_window.update()
         if name == 'DEFAULT':
-            WarningDialog().exec()
+            WarningDialog("No face detected!", "No face has been detected\nDefault user enabled").exec()
             # should not go further
             # default profile maybe
             # name is not shown in mainWindow
         self.accept()
+        self.main_window.menuBar().show()
         self.main_window.show()
         '''detected_id = 1
         if self.main_window.db.check_user(detected_id):
@@ -210,6 +246,19 @@ class LoginDialog(QDialog):
             index = self.main_window.db.add_user(str(uuid4()))
             self.main_window.current_user = index
             self.main_window.load_at_startup()'''
+
+    def _create(self, e):
+        name = str(uuid4())
+        index = self.main_window.db.add_user(name)
+        self.main_window.user_name = name
+        self.main_window.info_text.setText(name)
+        self.main_window.current_user = index
+        self.main_window.update()
+        self.accept()
+        self.main_window.show()
+        image = new_face()
+        cv2.imwrite(str((IMAGE_PATH / name).with_suffix('.jpg')), image)
+        encode_known()
 
 
 class Worker(QRunnable):
@@ -276,6 +325,38 @@ class MainWindow(QMainWindow):
         self.controls.addWidget(self.add_button)
         self.controls.addWidget(self.logout_button)
 
+        # actions
+        user_rename = QAction("Rename", self)
+        user_rename.setStatusTip("Change your user name")
+        user_rename.triggered.connect(self.rename_user)
+
+        user_delete = QAction("Delete", self)
+        user_delete.setStatusTip("Delete your user")
+        user_delete.triggered.connect(self.delete_user)
+
+        clear_action = QAction("Clear", self)
+        clear_action.setStatusTip("Clear all passwords")
+        clear_action.triggered.connect(self._clear_all)
+
+        add_action = QAction("Add", self)
+        add_action.setStatusTip("Add a new password")
+        add_action.triggered.connect(self._add)
+
+        logout_action = QAction("Logout", self)
+        logout_action.setStatusTip("Logout")
+        logout_action.triggered.connect(self._logout)
+
+        # menu
+        controls_menu = self.menuBar().addMenu("&Controls")
+        controls_menu.addAction(clear_action)
+        controls_menu.addAction(add_action)
+        controls_menu.addSeparator()
+        controls_menu.addAction(logout_action)
+
+        user_menu = self.menuBar().addMenu("User")
+        user_menu.addAction(user_rename)
+        user_menu.addAction(user_delete)
+
         self.lay1.addLayout(self.info_area)
         self.lay1.addWidget(self.passwords_area)
         self.lay1.addLayout(self.controls)
@@ -311,6 +392,11 @@ class MainWindow(QMainWindow):
             self.passwords_lay.takeAt(0).widget().deleteLater()
         # self.timer.stop()
         self.hide()
+        # nie bedzie mozliwosci edycji ustawien dla usera z poziomu login dialogu
+        self.current_user = 0
+        self.user_name = 'DEFAULT'
+        # menu sie nie ukrywa
+        self.menuBar().hide()
         self.login_page.show()
 
     def _delete(self, index):
@@ -345,8 +431,30 @@ class MainWindow(QMainWindow):
 
     def update_encoding(self):
         worker = Worker(encode_known)
-        # doesn't work... yet :)
         self.threadpool.start(worker)
+
+    def rename_user(self, e):
+        if self.user_name != "DEFAULT" and self.current_user != 0:
+            dialog = RenameDialog(self.user_name, self)
+            if dialog.exec():
+                # tu mozliwe ze nie zmienia sie nazwa do konca ale dziala XD
+                new_name = dialog.return_data()
+                file = (IMAGES / f"{self.user_name}.jpg")
+                file.rename(file.parent / f'{new_name}.jpg')
+                self.db.rename_user(self.current_user, new_name)
+                self.user_name = new_name
+                self.info_text.setText(new_name)
+                self.update()
+        else:
+            WarningDialog("Renaming ERROR", "Cannot rename default user!").exec()
+
+    def delete_user(self, e):
+        if self.user_name != "DEFAULT" and self.current_user != 0:
+            self.db.delete_user(self.current_user)
+            (IMAGES / f"{self.user_name}.jpg").unlink()
+            self._logout(None)
+        else:
+            WarningDialog("Deletion ERROR", "Cannot delete default user!").exec()
 
 
 def start_app():

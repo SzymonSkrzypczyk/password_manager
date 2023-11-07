@@ -8,25 +8,36 @@ import face_recognition
 IMAGE_PATH = Path(__file__).parent.parent / 'images'
 ENCODED_PATH = Path(__file__).parent.parent / 'data' / 'encoding.pkl'
 DEFAULT_USER_NAME = "DEFAULT"
+THRESHOLD = 30
 
 """
 dla nieznanych osob wykrywa jako ja
+prawdopodobnie bledy wynikaja zza ciemnych obrazow
 """
 
 
 def _get_face():
+    frame = new_face()
+    # frame = cv2.imread(str(Path(__file__).parent.parent / 'images_test' / 'tom cruise test.jpg'))
+    face_locations = face_recognition.face_locations(frame)
+    face_encodings = face_recognition.face_encodings(frame, face_locations)
+    return face_encodings, frame
+
+
+def new_face(threshold: int = THRESHOLD):
     cam = cv2.VideoCapture(0)
 
     ret, frame = cam.read()
     count = 0
-    while count > 25:
+    # mozliwe ze wszystkie problemy wynikaly z thresholdu
+    while count > threshold:
         ret, frame = cam.read()
         count += 1
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
     cam.release()
     cv2.destroyAllWindows()
-    face_locations = face_recognition.face_locations(frame)
-    face_encodings = face_recognition.face_encodings(frame, face_locations)
-    return face_encodings, frame
+    return frame
 
 
 def _recognize(face_encoding, loaded_item):
@@ -74,6 +85,7 @@ def recognize_gui(main_window):
         return 'DEFAULT'
 
     result, frame = validation_result
+    # teraz mozliwe ze tutaj sie robi blad bo obraz jest juz jasny
     print(result)
     # print(result)
     if result != "NOT DETECTED":
@@ -91,6 +103,7 @@ def recognize_gui(main_window):
         main_window.load_at_startup()
     # prawdopodobnie useless nie dziala jak powinno
     # blad na innym etapie
+    # ta czesc z tworzeniem nowego konta gdy nie wykryto przechodzi do login dialog
     else:
         name = str(uuid4())
         index = main_window.db.add_user(name)
@@ -101,4 +114,10 @@ def recognize_gui(main_window):
 
 
 if __name__ == '__main__':
-    encode_known()
+    cv2.imshow("", new_face(300))
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
+    # encode_known()
+    # encoding, _ = _get_face()
+    # print(validate_face())
+    # new_face()
