@@ -1,4 +1,5 @@
 from warnings import simplefilter
+from csv import DictWriter
 from pathlib import Path
 from uuid import uuid4
 from PySide6.QtWidgets import QApplication, QWidget, QScrollArea, QPushButton, QLabel, QDialog, QVBoxLayout,\
@@ -82,6 +83,36 @@ class PasswordField(QWidget):
 
     def get_index(self):
         return self.index
+
+
+class ExportDialog(QDialog):
+    def __init__(self, _main_window, parent=None):
+        super(ExportDialog, self).__init__(parent)
+        self.main_window = _main_window
+
+        self.lay1 = QVBoxLayout()
+
+        self.file_name = QLineEdit()
+        self.file_name.setPlaceholderText("Exported File Name")
+
+        self.button = QPushButton("Export")
+        self.button.clicked.connect(self._export)
+
+        self.lay1.addWidget(self.file_name)
+        self.lay1.addWidget(self.button)
+
+        self.setLayout(self.lay1)
+
+    def _export(self, e):
+        exported_file = Path(__file__).parent / f'{self.file_name.text()}.csv'
+        exported_file.touch(exist_ok=True)
+        with exported_file.open('w') as file:
+            fields = ['pk', 'name', 'password']
+            writer = DictWriter(file, fields)
+            writer.writeheader()
+            for i in self.main_window.db.get_user_passwords(self.main_window.current_user):
+                writer.writerow({"pk": i.pk, "name": i.name, "password": i.password})
+        self.accept()
 
 
 class RenameDialog(QDialog):
@@ -311,7 +342,8 @@ class MainWindow(QMainWindow):
 
         self.passwords_area = QScrollArea()
         self.passwords_lay = QVBoxLayout()
-        self.load_at_startup()
+        # tu byl blad z duplikowaniem
+        # self.load_at_startup()
         self.passwords_area.setLayout(self.passwords_lay)
 
         self.controls = QHBoxLayout()
@@ -342,6 +374,10 @@ class MainWindow(QMainWindow):
         add_action.setStatusTip("Add a new password")
         add_action.triggered.connect(self._add)
 
+        export_action = QAction("Export", self)
+        export_action.setStatusTip("Export your passwords in csv format")
+        export_action.triggered.connect(self.export_passwords)
+
         logout_action = QAction("Logout", self)
         logout_action.setStatusTip("Logout")
         logout_action.triggered.connect(self._logout)
@@ -350,6 +386,7 @@ class MainWindow(QMainWindow):
         controls_menu = self.menuBar().addMenu("&Controls")
         controls_menu.addAction(clear_action)
         controls_menu.addAction(add_action)
+        controls_menu.addAction(export_action)
         controls_menu.addSeparator()
         controls_menu.addAction(logout_action)
 
@@ -422,7 +459,7 @@ class MainWindow(QMainWindow):
 
     def load_at_startup(self):
         for i in self.db.get_user_passwords(self.current_user):
-            pw_field = PasswordField(i[1], i[2], i[0], self)
+            pw_field = PasswordField(i.name, i.password, i.pk, self)
             pw_field.delete_signal.connect(self._delete)
             self.passwords_lay.addWidget(pw_field)
         self.update()
@@ -455,6 +492,9 @@ class MainWindow(QMainWindow):
             self._logout(None)
         else:
             WarningDialog("Deletion ERROR", "Cannot delete default user!").exec()
+
+    def export_passwords(self, e):
+        ExportDialog(self).exec()
 
 
 def start_app():

@@ -5,10 +5,12 @@ import sqlite3
 from collections import namedtuple
 from dotenv import load_dotenv
 
+from src.password_encoding import encode_password, decode_password, decode_all
+
 Password = namedtuple("Password", "pk name password")
 DEFAULT_DB_PATH = Path(__file__).parent.parent / 'data' / 'db.sql'
 load_dotenv(Path(__file__).parent.parent / '.env')
-FERNET_KEY = getenv("FERNET_KEY")
+FERNET_KEY = getenv("FERNET_KEY").encode('utf-8')
 
 """
 dodac klucz Ferneta do usera!
@@ -103,6 +105,8 @@ class DBControl:
         :return: ID of an added password
         :rtype: int
         """
+        # dodaje enkrypcje
+        password = encode_password(password, FERNET_KEY)
         with self.get_con() as con:
             cur = con.cursor()
             cur.execute(f"INSERT INTO passwords(name, password, user_id) VALUES('{name}', '{password}',"
@@ -138,17 +142,22 @@ class DBControl:
             con.commit()
 
     def get_user_passwords(self, user_id: int) -> List[Password]:
-        """Returns passwords of a given user
+        """Returns decrypted passwords of a given user
 
         :param user_id: ID of the user
         :type user_id: int
         :return: list of passwords
         :rtype: List[Password]
         """
+        # dodaje dekrypcje
         with self.get_con() as con:
             cur = con.cursor()
             cur.execute(f"SELECT * FROM passwords WHERE user_id={user_id};")
-            data = [Password(i[0], i[1], i[2]) for i in cur.fetchall()]
+            # duplikuje sie w apce po zaladowaniu
+            data = [
+                Password(i[0], i[1], decode_password(i[2], FERNET_KEY))
+                for i in cur.fetchall()
+            ]
         return data
 
     def get_user_id(self, name: str) -> Union[int, None]:
@@ -220,6 +229,8 @@ class DBControl:
         :return: nothing
         :rtype: None
         """
+        # moze bedzie dzialalo
+        new_password = encode_password(new_password, FERNET_KEY)
         with self.get_con() as con:
             cur = con.cursor()
             cur.execute(f"UPDATE passwords SET password='{new_password}' WHERE pk={password_id};")
@@ -241,4 +252,4 @@ class DBControl:
 if __name__ == "__main__":
     db = DBControl()
     # db.rename_user(1, 'test')
-    print(db.get_all_users())
+    print(db.get_user_passwords(0))

@@ -87,7 +87,6 @@ def recognize_gui(main_window):
     result, frame = validation_result
     # teraz mozliwe ze tutaj sie robi blad bo obraz jest juz jasny
     print(result)
-    # print(result)
     if result != "NOT DETECTED":
         # blad tutaj
         # cos tu nie dziala z wykrywaniem twarzy
