@@ -1,10 +1,18 @@
+from os import getenv
 from pathlib import Path
 from typing import Union, List, Tuple
 import sqlite3
 from collections import namedtuple
+from dotenv import load_dotenv
 
 Password = namedtuple("Password", "pk name password")
 DEFAULT_DB_PATH = Path(__file__).parent.parent / 'data' / 'db.sql'
+load_dotenv(Path(__file__).parent.parent / '.env')
+FERNET_KEY = getenv("FERNET_KEY")
+
+"""
+dodac klucz Ferneta do usera!
+"""
 
 
 class DBControl:
@@ -19,7 +27,7 @@ class DBControl:
         :type path: Union[str, Path]
         """
         self.path = Path(path)
-        if not self.path.exists():
+        if not self.path.exists() or not self.tables_exist():
             self.setup()
         elif self.path.is_dir():
             raise FileNotFoundError("You have to provide a path to a file not directory!") from None
@@ -216,6 +224,18 @@ class DBControl:
             cur = con.cursor()
             cur.execute(f"UPDATE passwords SET password='{new_password}' WHERE pk={password_id};")
             con.commit()
+
+    def tables_exist(self) -> bool:
+        """Checks whether user table exists
+
+        :return: True if table exists, otherwise False
+        :rtype: bool
+        """
+        with self.get_con() as con:
+            cur = con.cursor()
+            cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='user';")
+            res = len(cur.fetchall())
+        return bool(res)
 
 
 if __name__ == "__main__":
