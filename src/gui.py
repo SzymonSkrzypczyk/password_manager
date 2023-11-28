@@ -1,14 +1,15 @@
+import csv
 from warnings import simplefilter
 from csv import DictWriter
 from pathlib import Path
 from uuid import uuid4
 from PySide6.QtWidgets import QApplication, QWidget, QScrollArea, QPushButton, QLabel, QDialog, QVBoxLayout,\
-     QHBoxLayout, QMainWindow, QLineEdit, QFormLayout, QDialogButtonBox
-from PySide6.QtGui import QFont, QAction
-from PySide6.QtCore import Qt, Signal, QRunnable, Slot, QThreadPool, QTimer
+     QHBoxLayout, QMainWindow, QLineEdit, QFormLayout, QDialogButtonBox, QFileDialog
+from PySide6.QtGui import QFont, QAction, QMovie
+from PySide6.QtCore import Qt, Signal, QRunnable, Slot, QThreadPool, QTimer, QSize
 import cv2
 
-from src.db import DBControl
+from src.db import DBControl, Password
 from src.face_rec_easier import recognize_gui, encode_known, new_face, IMAGE_PATH
 
 """
@@ -21,8 +22,11 @@ pojawiaja sie warningi
 dodanie opcji zmiany profilu itd
 moze trzeba encodowac po tym jak sie doda nowego uzytkownika(juz sie to dzieje jednak)
 jebei sie usuwanie usera a potem update'owanie
+trzeba usunac menu po wylogowaniu
+dodac manuale
 """
 IMAGES = Path(__file__).parent.parent / 'images'
+MANUALS = Path(__file__).parent.parent / 'data' / 'manuals.gif'
 simplefilter("ignore")
 
 
@@ -85,33 +89,122 @@ class PasswordField(QWidget):
         return self.index
 
 
+class LoadDialog(QDialog):
+    def __init__(self, _main_window, parent=None):
+        super(LoadDialog, self).__init__(parent)
+        self.main_window = _main_window
+        self.path = None
+        self.passwords = []
+
+        self.lay1 = QVBoxLayout()
+
+        self.file_button = QPushButton("File Select")
+        self.file_button.clicked.connect(self._set_path)
+        self.confirm_button = QPushButton("Confirm")
+        self.confirm_button.clicked.connect(self._load)
+
+        self.lay1.addWidget(self.file_button)
+        self.lay1.addWidget(self.confirm_button)
+
+        self.setLayout(self.lay1)
+
+    def _set_path(self):
+        path = QFileDialog().getOpenFileName(self, filter="*.csv")
+        if Path(path[0]).exists():
+            self.path = Path(path[0])
+
+    def _load(self):
+        if self.path is not None:
+            with self.path.open('r') as csv_file:
+                csv_reader = csv.DictReader(csv_file, fieldnames=("pk", "name", "password"))
+                next(csv_reader)
+                for i in csv_reader:
+                    self.passwords.append(Password(i["pk"], i["name"], i["password"]))
+            self.accept()
+
+    def get_file(self):
+        print(self.passwords)
+        return self.passwords
+
+
 class ExportDialog(QDialog):
     def __init__(self, _main_window, parent=None):
         super(ExportDialog, self).__init__(parent)
         self.main_window = _main_window
+        self.directory_path = None
 
         self.lay1 = QVBoxLayout()
 
         self.file_name = QLineEdit()
         self.file_name.setPlaceholderText("Exported File Name")
 
+        # raczej nie w ten sposob
+        self.directory = QPushButton("Directory")
+        self.directory.clicked.connect(self._set_directory)
+
         self.button = QPushButton("Export")
         self.button.clicked.connect(self._export)
 
         self.lay1.addWidget(self.file_name)
+        self.lay1.addWidget(self.directory)
         self.lay1.addWidget(self.button)
 
         self.setLayout(self.lay1)
 
     def _export(self, e):
-        exported_file = Path(__file__).parent / f'{self.file_name.text()}.csv'
-        exported_file.touch(exist_ok=True)
-        with exported_file.open('w') as file:
-            fields = ['pk', 'name', 'password']
-            writer = DictWriter(file, fields)
-            writer.writeheader()
-            for i in self.main_window.db.get_user_passwords(self.main_window.current_user):
-                writer.writerow({"pk": i.pk, "name": i.name, "password": i.password})
+        # mozna dodac opcje wybierania sciezki
+        # tu trzeba poprawic calosc z wybieraniem pliku
+        if self.directory_path is not None:
+            exported_file = self.directory_path / f'{self.file_name.text()}.csv'
+            exported_file.touch(exist_ok=True)
+            with exported_file.open('w') as file:
+                fields = ['pk', 'name', 'password']
+                writer = DictWriter(file, fields)
+                writer.writeheader()
+                for i in self.main_window.db.get_user_passwords(self.main_window.current_user):
+                    writer.writerow({"pk": i.pk, "name": i.name, "password": i.password})
+            self.accept()
+
+    def _set_directory(self, e):
+        directory = QFileDialog().getExistingDirectory(self)
+        # print(directory)
+        self.directory_path = Path(directory)
+
+
+class ManualDialog(QDialog):
+    """Manuale jako gif z dzialania aplikacji"""
+    def __init__(self, logged_out: bool, parent=None):
+        super(ManualDialog, self).__init__(parent)
+        self.movie = QMovie(str(MANUALS))
+        self.logged_out = logged_out
+
+        self.lay1 = QVBoxLayout()
+
+        self.gif_label = QLabel()
+        self.gif_label.setMovie(self.movie)
+        self.movie.start()
+
+        self.leave_button = QPushButton("Leave")
+        self.leave_button.clicked.connect(self._leave)
+
+        self.lay1.addWidget(self.gif_label)
+        self.lay1.addWidget(self.leave_button)
+
+        self.setLayout(self.lay1)
+
+    def resizeEvent(self, event):
+        rect = self.geometry()
+        size = QSize(min(rect.width(), rect.height()), min(rect.width(), rect.height()))
+
+        movie = self.gif_label.movie()
+        movie.setScaledSize(size)
+
+    def __del__(self):
+        # tu moze bedize trzeba poeksperymentowac z dzialaniem destruktora
+        self.movie.stop()
+
+    def _leave(self, e):
+        self.movie.stop()
         self.accept()
 
 
@@ -238,10 +331,12 @@ class LoginDialog(QDialog):
         self.text.setFont(self.font_text)
 
         self.login_button = QPushButton("Login")
+        self.login_button.setStatusTip("Logs in an user")
         self.login_button.clicked.connect(self.detect)
         self.login_button.setFont(self.font_button)
 
         self.create_button = QPushButton("Add Account")
+        self.create_button.setStatusTip("Creates an account for a new user")
         self.create_button.clicked.connect(self._create)
         self.create_button.setFont(self.font_button)
 
@@ -318,6 +413,8 @@ class MainWindow(QMainWindow):
         self.current_user = 0  # id
         self.user_name = "USERNAME"
         self.db = DBControl()
+        # starts at login dialog hence an user is logged out
+        self.logged_out = True
 
         # background tasks
         self.timer = QTimer()
@@ -348,10 +445,13 @@ class MainWindow(QMainWindow):
 
         self.controls = QHBoxLayout()
         self.clear_all_button = QPushButton("Clear all")
+        self.clear_all_button.setStatusTip("Clears all passwords")
         self.clear_all_button.clicked.connect(self._clear_all)
         self.add_button = QPushButton("Add")
+        self.add_button.setStatusTip("Adds a new password")
         self.add_button.clicked.connect(self._add)
         self.logout_button = QPushButton("Logout")
+        self.logout_button.setStatusTip("Logs out an user")
         self.logout_button.clicked.connect(self._logout)
         self.controls.addWidget(self.clear_all_button)
         self.controls.addWidget(self.add_button)
@@ -378,21 +478,33 @@ class MainWindow(QMainWindow):
         export_action.setStatusTip("Export your passwords in csv format")
         export_action.triggered.connect(self.export_passwords)
 
+        load_action = QAction("Load", self)
+        load_action.setStatusTip("Load passwords from a csv file")
+        load_action.triggered.connect(self.load_passwords)
+
         logout_action = QAction("Logout", self)
         logout_action.setStatusTip("Logout")
         logout_action.triggered.connect(self._logout)
+
+        manual_action = QAction("Manual", self)
+        manual_action.setStatusTip("Apps's manuals")
+        manual_action.triggered.connect(self.load_manuals)
 
         # menu
         controls_menu = self.menuBar().addMenu("&Controls")
         controls_menu.addAction(clear_action)
         controls_menu.addAction(add_action)
         controls_menu.addAction(export_action)
+        controls_menu.addAction(load_action)
         controls_menu.addSeparator()
         controls_menu.addAction(logout_action)
 
         user_menu = self.menuBar().addMenu("User")
         user_menu.addAction(user_rename)
         user_menu.addAction(user_delete)
+
+        manual_menu = self.menuBar().addMenu("Manual")
+        manual_menu.addAction(manual_action)
 
         self.lay1.addLayout(self.info_area)
         self.lay1.addWidget(self.passwords_area)
@@ -425,16 +537,20 @@ class MainWindow(QMainWindow):
         self.update()
 
     def _logout(self, e):
-        while self.passwords_lay.count():
-            self.passwords_lay.takeAt(0).widget().deleteLater()
-        # self.timer.stop()
-        self.hide()
-        # nie bedzie mozliwosci edycji ustawien dla usera z poziomu login dialogu
-        self.current_user = 0
-        self.user_name = 'DEFAULT'
-        # menu sie nie ukrywa
-        self.menuBar().hide()
-        self.login_page.show()
+        if not self.logged_out:
+            while self.passwords_lay.count():
+                self.passwords_lay.takeAt(0).widget().deleteLater()
+            # self.timer.stop()
+            self.hide()
+            # nie bedzie mozliwosci edycji ustawien dla usera z poziomu login dialogu
+            self.current_user = 0
+            self.user_name = 'DEFAULT'
+            self.logged_out = True
+            # menu sie nie ukrywa
+            self.menuBar().hide()
+            self.login_page.show()
+        else:
+            WarningDialog("Wrong Action", "You cannot log out while already being logged out!").exec()
 
     def _delete(self, index):
         for i in range(self.passwords_lay.count()):
@@ -464,6 +580,8 @@ class MainWindow(QMainWindow):
             self.passwords_lay.addWidget(pw_field)
         self.update()
         self.login_page.hide()
+        # logged in
+        self.logged_out = False
         # self.timer.start()
 
     def update_encoding(self):
@@ -495,6 +613,16 @@ class MainWindow(QMainWindow):
 
     def export_passwords(self, e):
         ExportDialog(self).exec()
+
+    def load_passwords(self, e):
+        dialog = LoadDialog(self)
+        if dialog.exec():
+            for i in dialog.get_file():
+                self.db.add_password(i.name, i.password, self.current_user)
+        self.refresh()
+
+    def load_manuals(self, e):
+        ManualDialog(self.logged_out, self).exec()
 
 
 def start_app():

@@ -74,4 +74,5 @@ def decode_all(encoded_passwords: Iterable[str], key: bytes) -> List[str]:
 
 
 if __name__ == "__main__":
-    print(generate_key())
+    _k = generate_key()
+    print(encode_password('XD', _k))
